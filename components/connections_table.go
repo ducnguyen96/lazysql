@@ -2,6 +2,7 @@ package components
 
 import (
 	"github.com/gdamore/tcell/v2"
+	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/rivo/tview"
 
 	"github.com/jorgerojas26/lazysql/app"
@@ -13,7 +14,10 @@ type ConnectionsTable struct {
 	Wrapper       *tview.Flex
 	errorTextView *tview.TextView
 	error         string
+	filter        string
 	connections   []models.Connection
+	// visible maps a table row to its index in connections.
+	visible []int
 }
 
 var connectionsTable *ConnectionsTable
@@ -41,19 +45,88 @@ func NewConnectionsTable() *ConnectionsTable {
 	return connectionsTable
 }
 
-func (ct *ConnectionsTable) AddConnection(connection models.Connection) {
-	rowCount := ct.GetRowCount()
+// filterConnectionIndexes returns the indexes of the connections whose name
+// fuzzy matches query, in their original order. An empty query matches all.
+func filterConnectionIndexes(connections []models.Connection, query string) []int {
+	indexes := make([]int, 0, len(connections))
+
+	for i, connection := range connections {
+		if fuzzy.MatchFold(query, connection.Name) {
+			indexes = append(indexes, i)
+		}
+	}
+
+	return indexes
+}
+
+func connectionDisplayName(connection models.Connection) string {
 	displayName := connection.Name
 
 	if connection.ReadOnly {
-		displayName = "[lightblue]READ[-] " + connection.Name
+		displayName = "[lightblue]READ[-] " + displayName
 	}
-	ct.SetCellSimple(rowCount, 0, displayName)
+
+	if mainPages != nil && mainPages.HasPage(connection.Name) {
+		displayName = "[green]* " + displayName
+	}
+
+	return displayName
+}
+
+// render redraws the rows that pass the current filter.
+func (ct *ConnectionsTable) render() {
+	ct.Clear()
+
+	ct.visible = filterConnectionIndexes(ct.connections, ct.filter)
+
+	for row, index := range ct.visible {
+		ct.SetCellSimple(row, 0, connectionDisplayName(ct.connections[index]))
+	}
+
+	ct.Select(0, 0)
+}
+
+func (ct *ConnectionsTable) AddConnection(connection models.Connection) {
 	ct.connections = append(ct.connections, connection)
+	ct.render()
 }
 
 func (ct *ConnectionsTable) GetConnections() []models.Connection {
 	return ct.connections
+}
+
+// GetSelectedConnectionIndex returns the index into GetConnections of the
+// highlighted row, or -1 when no connection is selected.
+func (ct *ConnectionsTable) GetSelectedConnectionIndex() int {
+	row, _ := ct.GetSelection()
+
+	if row < 0 || row >= len(ct.visible) {
+		return -1
+	}
+
+	return ct.visible[row]
+}
+
+// Refresh redraws the table, keeping the highlighted row where it is.
+func (ct *ConnectionsTable) Refresh() {
+	row, column := ct.GetSelection()
+
+	ct.render()
+
+	if row < ct.GetRowCount() {
+		ct.Select(row, column)
+	}
+}
+
+// Filter narrows the table down to the connections matching query.
+func (ct *ConnectionsTable) Filter(query string) {
+	ct.filter = query
+	ct.render()
+}
+
+// FilteredCount returns how many connections the current filter shows.
+func (ct *ConnectionsTable) FilteredCount() int {
+	return len(ct.visible)
 }
 
 func (ct *ConnectionsTable) GetError() string {
@@ -61,15 +134,8 @@ func (ct *ConnectionsTable) GetError() string {
 }
 
 func (ct *ConnectionsTable) SetConnections(connections []models.Connection) {
-	ct.connections = make([]models.Connection, 0)
-
-	ct.Clear()
-
-	for _, connection := range connections {
-		ct.AddConnection(connection)
-	}
-
-	ct.Select(0, 0)
+	ct.connections = append([]models.Connection(nil), connections...)
+	ct.render()
 	App.ForceDraw()
 }
 

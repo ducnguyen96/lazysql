@@ -20,7 +20,8 @@ import (
 
 type ConnectionSelection struct {
 	*tview.Flex
-	StatusText *tview.TextView
+	StatusText  *tview.TextView
+	SearchInput *tview.InputField
 }
 
 func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *models.ConnectionPages) *ConnectionSelection {
@@ -68,23 +69,77 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 	statusText := tview.NewTextView()
 	statusText.SetBorderPadding(1, 1, 0, 0)
 
+	searchInput := tview.NewInputField()
+	searchInput.SetLabel("Search: ")
+	searchInput.SetLabelColor(app.Styles.InverseTextColor)
+	searchInput.SetPlaceholder("Press / to search connections")
+	searchInput.SetFieldStyle(tcell.StyleDefault.Background(app.Styles.PrimitiveBackgroundColor).Foreground(tview.Styles.PrimaryTextColor))
+	searchInput.SetPlaceholderStyle(tcell.StyleDefault.Background(app.Styles.PrimitiveBackgroundColor).Foreground(tview.Styles.InverseTextColor))
+
+	searchCount := tview.NewTextView()
+	searchCount.SetTextAlign(tview.AlignRight)
+	searchCount.SetTextColor(app.Styles.TertiaryTextColor)
+
+	searchWrapper := tview.NewFlex().SetDirection(tview.FlexRowCSS)
+	searchWrapper.AddItem(searchInput, 0, 1, false)
+	searchWrapper.AddItem(searchCount, 12, 0, false)
+
+	wrapper.AddItem(searchWrapper, 1, 0, false)
 	wrapper.AddItem(NewConnectionsTable(), 0, 1, true)
 	wrapper.AddItem(statusText, 4, 0, false)
 	wrapper.AddItem(buttonsWrapper, 3, 0, false)
 
 	cs := &ConnectionSelection{
-		Flex:       wrapper,
-		StatusText: statusText,
+		Flex:        wrapper,
+		StatusText:  statusText,
+		SearchInput: searchInput,
 	}
 
+	updateSearchCount := func() {
+		if searchInput.GetText() == "" {
+			searchCount.SetText("")
+			return
+		}
+
+		searchCount.SetText(fmt.Sprintf("%d/%d ", connectionsTable.FilteredCount(), len(connectionsTable.GetConnections())))
+	}
+
+	searchInput.SetChangedFunc(func(text string) {
+		connectionsTable.Filter(text)
+		updateSearchCount()
+	})
+
+	searchInput.SetFocusFunc(func() {
+		searchInput.SetLabelColor(app.Styles.TertiaryTextColor)
+	})
+
+	searchInput.SetBlurFunc(func() {
+		searchInput.SetLabelColor(app.Styles.InverseTextColor)
+	})
+
+	// Enter keeps the current filter, Escape clears it. Both return focus to
+	// the connections table.
+	searchInput.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEscape {
+			searchInput.SetText("")
+		}
+
+		App.SetFocus(connectionsTable)
+	})
+
 	wrapper.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Let the search field consume everything while it is focused,
+		// otherwise typing would trigger the connection commands below.
+		if searchInput.HasFocus() {
+			return event
+		}
+
 		connections := connectionsTable.GetConnections()
 
 		command := app.Keymaps.Group(app.ConnectionGroup).Resolve(event)
 
-		if len(connections) != 0 {
-			row, _ := connectionsTable.GetSelection()
-			selectedConnection := connections[row]
+		if selectedIndex := connectionsTable.GetSelectedConnectionIndex(); selectedIndex >= 0 {
+			selectedConnection := connections[selectedIndex]
 
 			switch command {
 			case commands.Connect:
@@ -104,7 +159,7 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 					confirmationModal = nil
 
 					if buttonLabel == "Yes" {
-						newConnections := append(connections[:row], connections[row+1:]...)
+						newConnections := slices.Delete(slices.Clone(connections), selectedIndex, selectedIndex+1)
 
 						err := app.App.SaveConnections(newConnections)
 						if err != nil {
@@ -123,6 +178,9 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 		}
 
 		switch command {
+		case commands.Search:
+			App.SetFocus(searchInput)
+			return nil
 		case commands.NewConnection:
 			connectionForm.SetAction(actionNewConnection)
 			connectionForm.GetFormItemByLabel("Name").(*tview.InputField).SetText("")
@@ -252,9 +310,6 @@ func (cs *ConnectionSelection) Connect(connection models.Connection) *tview.Appl
 		return App.Draw()
 	}
 
-	selectedRow, selectedCol := connectionsTable.GetSelection()
-	cell := connectionsTable.GetCell(selectedRow, selectedCol)
-	cell.SetText(fmt.Sprintf("[green]* %s", cell.Text))
 	cs.StatusText.SetText("")
 
 	newHome := NewHomePage(connection, newDBDriver)
@@ -262,6 +317,10 @@ func (cs *ConnectionSelection) Connect(connection models.Connection) *tview.Appl
 	newHome.Tree.Wrapper.SetTitle(connection.Name)
 
 	mainPages.AddAndSwitchToPage(connection.Name, newHome, true)
+
+	// The page now exists, so the table can mark the connection as connected.
+	connectionsTable.Refresh()
+
 	App.SetFocus(newHome.Tree)
 
 	return App.Draw()

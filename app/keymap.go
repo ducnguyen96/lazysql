@@ -79,6 +79,7 @@ var Keymaps = KeymapSystem{
 			Bind{Key: Key{Code: tcell.KeyEnter}, Cmd: cmd.Connect, Description: "Connect to database"},
 			Bind{Key: Key{Char: 'e'}, Cmd: cmd.EditConnection, Description: "Edit a database connection"},
 			Bind{Key: Key{Char: 'd'}, Cmd: cmd.DeleteConnection, Description: "Delete a database connection"},
+			Bind{Key: Key{Char: '/'}, Cmd: cmd.Search, Description: "Search connections"},
 			Bind{Key: Key{Char: 'q'}, Cmd: cmd.Quit, Description: "Quit"},
 		},
 		TreeGroup: {

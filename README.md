@@ -474,6 +474,7 @@ Available groups: `Home`, `Connection`, `Tree`, `TreeFilter`, `Table`, `Editor`,
 | Enter | Connect | Connect to database |
 | e | EditConnection | Edit a database connection |
 | d | DeleteConnection | Delete a database connection |
+| / | Search | Search connections |
 | q | Quit | Quit |
 
 #### Tree

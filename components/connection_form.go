@@ -127,10 +127,10 @@ func (form *ConnectionForm) inputCapture(connectionPages *models.ConnectionPages
 
 			case actionEditConnection:
 				newDatabases = make([]models.Connection, len(databases))
-				row, _ := connectionsTable.GetSelection()
+				selectedIndex := connectionsTable.GetSelectedConnectionIndex()
 
 				for i, database := range databases {
-					if i == row {
+					if i == selectedIndex {
 						// Start from the existing connection so fields not
 						// present on the form (Commands, Username, Password,
 						// Hostname, Port, URLParams, Schemas, ...) are preserved.
