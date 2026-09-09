@@ -217,6 +217,49 @@ Environment variables (`${env:VAR_NAME}`) work in local config files just like i
 
 Note: When a local `.lazysql.toml` is found, the full config is saved to the local file when you modify connections from the UI.
 
+### Drop-in Configuration
+
+A `config.d` directory next to the global config file (for example
+`~/.config/lazysql/config.d/`) is read after `config.toml`. Every `*.toml` file
+in it is merged in filename order, using the same rules as a local config, and
+the result is applied **on top of** `config.toml` but **below** any
+`.lazysql.toml`:
+
+```
+config.toml  <  config.d/*.toml  <  .lazysql.toml
+```
+
+Drop-ins are never written to. That is the point: lazysql saves connections back
+into `config.toml`, so a `config.toml` owned by an external tool — Nix
+home-manager, a system package, a dotfiles manager — would make the UI unable to
+add or edit connections. Put the managed settings in a drop-in instead and
+`config.toml` stays yours.
+
+**Example `~/.config/lazysql/config.d/10-keymap.toml`:**
+
+```toml
+[keymap.home]
+ToggleQueryHistory = "Ctrl-Y"
+
+[keymap.queryhistory]
+ToggleQueryHistory = "Ctrl-Y"
+```
+
+If the global config is loaded from a different path (`lazysql --config
+path/to/config.toml`), the drop-in directory is `path/to/config.d`.
+
+### Nix
+
+The repository is a flake:
+
+```sh
+nix run github:ducnguyen96/lazysql        # run it
+nix build github:ducnguyen96/lazysql      # build ./result/bin/lazysql
+nix develop github:ducnguyen96/lazysql    # dev shell with go, gopls, golangci-lint
+```
+
+It also exports `overlays.default`, which adds `pkgs.lazysql`.
+
 
 ## Usage
 

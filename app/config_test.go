@@ -4,6 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
+
+	cmd "github.com/jorgerojas26/lazysql/commands"
 )
 
 func TestExpandEnvVars(t *testing.T) {
@@ -470,5 +474,168 @@ DefaultPageSize = 500
 	}
 	if App.config.AppConfig.MaxQueryHistoryPerConnection != 100 {
 		t.Errorf("MaxQueryHistoryPerConnection = %d, want 100 (default)", App.config.AppConfig.MaxQueryHistoryPerConnection)
+	}
+}
+
+func TestLoadConfigDropIns(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
+
+	saved := saveKeymaps()
+	t.Cleanup(func() {
+		restoreKeymaps(saved)
+	})
+
+	tmpDir := t.TempDir()
+
+	// Create .git directory to act as repo boundary
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	globalConfig := `
+[application]
+DefaultPageSize = 100
+TreeWidth = 40
+
+[[database]]
+name = "global-conn"
+hostname = "global-host"
+
+[keymap.home]
+ToggleQueryHistory = "Ctrl-_"
+`
+	globalPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(globalPath, []byte(globalConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dropInDir := filepath.Join(tmpDir, "config.d")
+	if err := os.MkdirAll(dropInDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	dropIns := map[string]string{
+		"10-first.toml": `
+[application]
+DefaultPageSize = 200
+
+[keymap.home]
+ToggleQueryHistory = "Ctrl-B"
+`,
+		"20-second.toml": `
+[keymap.home]
+ToggleQueryHistory = "Ctrl-Y"
+`,
+		"ignored.txt": `[application]
+DefaultPageSize = 999
+`,
+	}
+	for name, content := range dropIns {
+		if err := os.WriteFile(filepath.Join(dropInDir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	App.config = &Config{ConfigFile: globalPath}
+
+	if err := LoadConfig(globalPath); err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Drop-ins override the global config...
+	if App.config.AppConfig.DefaultPageSize != 200 {
+		t.Errorf("DefaultPageSize = %d, want 200 (drop-in override)", App.config.AppConfig.DefaultPageSize)
+	}
+
+	// ...and later drop-ins win over earlier ones.
+	if got := App.config.Keymaps["home"]["ToggleQueryHistory"]; got != "Ctrl-Y" {
+		t.Errorf("keymap.home.ToggleQueryHistory = %q, want %q", got, "Ctrl-Y")
+	}
+
+	// Non-TOML files in the drop-in directory are ignored.
+	if App.config.AppConfig.TreeWidth != 40 {
+		t.Errorf("TreeWidth = %d, want 40 (untouched by drop-ins)", App.config.AppConfig.TreeWidth)
+	}
+
+	// Keys the drop-ins don't mention are left alone.
+	if len(App.config.Connections) != 1 || App.config.Connections[0].Name != "global-conn" {
+		t.Errorf("Connections = %+v, want the single global-conn", App.config.Connections)
+	}
+
+	// The rebind actually reached the live keymap.
+	bound := false
+	for _, bind := range Keymaps.Groups[HomeGroup] {
+		if bind.Cmd != cmd.ToggleQueryHistory {
+			continue
+		}
+		bound = true
+		if bind.Key.Code != tcell.KeyCtrlY {
+			t.Errorf("ToggleQueryHistory bound to %v, want tcell.KeyCtrlY", bind.Key)
+		}
+	}
+	if !bound {
+		t.Fatal("ToggleQueryHistory not bound in the home group")
+	}
+}
+
+func TestLoadConfigLocalOverridesDropIns(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
+
+	saved := saveKeymaps()
+	t.Cleanup(func() {
+		restoreKeymaps(saved)
+	})
+
+	tmpDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	globalPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(globalPath, []byte("[application]\nDefaultPageSize = 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dropInDir := filepath.Join(tmpDir, "config.d")
+	if err := os.MkdirAll(dropInDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dropInDir, "10-nix.toml"), []byte("[application]\nDefaultPageSize = 200\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, ".lazysql.toml"), []byte("[application]\nDefaultPageSize = 300\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	App.config = &Config{ConfigFile: globalPath}
+
+	if err := LoadConfig(globalPath); err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if App.config.AppConfig.DefaultPageSize != 300 {
+		t.Errorf("DefaultPageSize = %d, want 300 (local wins over drop-ins)", App.config.AppConfig.DefaultPageSize)
 	}
 }

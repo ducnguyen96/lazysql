@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -123,18 +124,89 @@ func mergeValues(globalVal, localVal any) any {
 	return localVal
 }
 
+// DropInConfigDir returns the drop-in directory that sits next to configFile.
+// Every `*.toml` file in it is merged, in filename order, on top of the global
+// config and below any local `.lazysql.toml`. Drop-ins are meant for configs
+// managed by an external tool (Nix, a system package, ...) that owns a
+// read-only file and must not fight with the connections lazysql writes back
+// into config.toml.
+func DropInConfigDir(configFile string) string {
+	return filepath.Join(filepath.Dir(configFile), "config.d")
+}
+
+// readTOMLFile reads a TOML file, expands its env vars and unmarshals it into
+// a generic map. A missing file yields a nil map and no error.
+func readTOMLFile(path string) (map[string]any, error) {
+	file, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var out map[string]any
+	if err := toml.Unmarshal([]byte(expandEnvVars(string(file))), &out); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+
+	return out, nil
+}
+
+// readDropInConfigs merges every `*.toml` file in dir, in filename order.
+// A missing directory yields a nil map and no error.
+func readDropInConfigs(dir string) (map[string]any, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+
+	var merged map[string]any
+	for _, name := range names {
+		dropIn, err := readTOMLFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		if dropIn == nil {
+			continue
+		}
+		if merged == nil {
+			merged = dropIn
+			continue
+		}
+		merged = mergeMaps(merged, dropIn)
+	}
+
+	return merged, nil
+}
+
 func LoadConfig(configFile string) error {
 	// Load global config
-	file, err := os.ReadFile(configFile)
-	if err != nil && !os.IsNotExist(err) {
+	mergedMap, err := readTOMLFile(configFile)
+	if err != nil {
 		return err
 	}
 
-	expanded := expandEnvVars(string(file))
-
-	var globalMap map[string]any
-	if err := toml.Unmarshal([]byte(expanded), &globalMap); err != nil {
+	// Layer the read-only drop-ins on top of it
+	dropInMap, err := readDropInConfigs(DropInConfigDir(configFile))
+	if err != nil {
 		return err
+	}
+
+	if dropInMap != nil {
+		mergedMap = mergeMaps(mergedMap, dropInMap)
 	}
 
 	// Load local config if it exists
@@ -143,23 +215,15 @@ func LoadConfig(configFile string) error {
 		return err
 	}
 
-	mergedMap := globalMap
 	if localConfigPath != "" {
 		App.config.LocalConfigFile = localConfigPath
 
-		localFile, err := os.ReadFile(localConfigPath)
+		localMap, err := readTOMLFile(localConfigPath)
 		if err != nil {
 			return err
 		}
 
-		localExpanded := expandEnvVars(string(localFile))
-
-		var localMap map[string]any
-		if err := toml.Unmarshal([]byte(localExpanded), &localMap); err != nil {
-			return err
-		}
-
-		mergedMap = mergeMaps(globalMap, localMap)
+		mergedMap = mergeMaps(mergedMap, localMap)
 	}
 
 	// Marshal merged map back to TOML and unmarshal into App.config.
