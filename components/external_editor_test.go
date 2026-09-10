@@ -130,17 +130,18 @@ func TestNewExternalEditorTarget_CreatesAMissingDirectory(t *testing.T) {
 }
 
 func TestNewExternalEditorTarget_ExpandsHome(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("no home directory available")
-	}
+	// A stand-in home: the real one must not be touched, and sandboxed builds
+	// point HOME at a directory that does not exist.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
-	target, err := newExternalEditorTarget("~", "")
+	target, err := newExternalEditorTarget("~/queries", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if want := filepath.Join(home, externalEditorFileName); target.Path != want {
+	if want := filepath.Join(home, "queries", externalEditorFileName); target.Path != want {
 		t.Errorf("expected %s, got %s", want, target.Path)
 	}
 }
