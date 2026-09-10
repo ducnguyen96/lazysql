@@ -66,6 +66,7 @@ const (
 
 	eventSQLEditorQuery  string = "Query"
 	eventSQLEditorEscape string = "Escape"
+	eventSQLEditorStatus string = "Status"
 
 	eventResultsTableFiltering string = "FilteringResultsTable"
 

@@ -3,7 +3,7 @@
   stdenv,
   buildGoModule,
   libx11,
-  version ? "0.5.6-unstable",
+  version ? "0.6.0-unstable",
 }:
 
 buildGoModule {

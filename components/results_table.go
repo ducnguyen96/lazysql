@@ -203,6 +203,17 @@ func (table *ResultsTable) WithEditor() *ResultsTable {
 
 	table.Editor = editor
 
+	// The tables arrive later, from loadEditorSchema, but the connection info is
+	// known now — so the external editor always has something to show.
+	initialSnapshot := &SchemaSnapshot{
+		Connection: table.connectionIdentifier,
+		Database:   table.GetDatabaseName(),
+	}
+	if table.DBDriver != nil {
+		initialSnapshot.Provider = table.DBDriver.GetProvider()
+	}
+	editor.SetSchemaSnapshot(initialSnapshot)
+
 	table.Wrapper.Clear()
 
 	table.Wrapper.AddItem(editor, 12, 0, true)
@@ -271,11 +282,34 @@ func (table *ResultsTable) loadEditorSchema() {
 		}
 	}
 
+	snapshot := &SchemaSnapshot{
+		Connection: table.connectionIdentifier,
+		Database:   dbName,
+	}
+	if table.DBDriver != nil {
+		snapshot.Provider = table.DBDriver.GetProvider()
+	}
+
+	// Publish the table names right away so the external editor has something
+	// to work with while the columns are still being fetched.
+	tableNamesOnly := &SchemaSnapshot{
+		Connection: snapshot.Connection,
+		Provider:   snapshot.Provider,
+		Database:   snapshot.Database,
+		Tables:     make([]SchemaTable, 0, len(allTables)),
+	}
+	for _, name := range allTables {
+		tableNamesOnly.Tables = append(tableNamesOnly.Tables, SchemaTable{Name: name})
+	}
+
 	app.App.QueueUpdateDraw(func() {
 		if table.Editor != nil {
 			table.Editor.SetTables(allTables)
+			table.Editor.SetSchemaSnapshot(tableNamesOnly)
 		}
 	})
+
+	var foreignKeys []foreignKeyEdge
 
 	// Load columns for each table, using the qualified name for the driver call
 	// but storing under the bare table name for autocomplete lookup ("table.col").
@@ -299,6 +333,16 @@ func (table *ResultsTable) loadEditorSchema() {
 			continue
 		}
 
+		// The same rows describe the schema handed to the external editor.
+		snapshot.Tables = append(snapshot.Tables, SchemaTable{
+			Name:    nt.bareName,
+			Columns: parseSchemaColumns(cols),
+		})
+
+		if fks, err := table.DBDriver.GetForeignKeys(dbName, nt.qualifiedName); err == nil {
+			foreignKeys = append(foreignKeys, parseForeignKeys(nt.bareName, fks)...)
+		}
+
 		tblCopy := nt.bareName
 		app.App.QueueUpdateDraw(func() {
 			if table.Editor != nil {
@@ -306,6 +350,15 @@ func (table *ResultsTable) loadEditorSchema() {
 			}
 		})
 	}
+
+	snapshot.ApplyForeignKeys(foreignKeys)
+	snapshot.Complete = true
+
+	app.App.QueueUpdateDraw(func() {
+		if table.Editor != nil {
+			table.Editor.SetSchemaSnapshot(snapshot)
+		}
+	})
 }
 
 func (table *ResultsTable) subscribeToTreeChanges() {
@@ -970,6 +1023,11 @@ func (table *ResultsTable) subscribeToEditorChanges() {
 					}()
 				}
 			}
+		case eventSQLEditorStatus:
+			message := stateChange.Value.(string)
+			App.QueueUpdateDraw(func() {
+				table.SetResultsInfo(message)
+			})
 		case eventSQLEditorEscape:
 			App.QueueUpdateDraw(func() {
 				table.SetIsFiltering(false)

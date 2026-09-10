@@ -62,6 +62,7 @@ var Keymaps = KeymapSystem{
 			Bind{Key: Key{Char: 'L'}, Cmd: cmd.MoveRight, Description: "Focus table"},
 			Bind{Key: Key{Char: 'H'}, Cmd: cmd.MoveLeft, Description: "Focus tree"},
 			Bind{Key: Key{Code: tcell.KeyCtrlE}, Cmd: cmd.SwitchToEditorView, Description: "Open SQL editor"},
+			Bind{Key: Key{Code: tcell.KeyCtrlG}, Cmd: cmd.OpenSchemaInExternalEditor, Description: "Open external editor with schema context"},
 			Bind{Key: Key{Code: tcell.KeyCtrlS}, Cmd: cmd.Save, Description: "Execute pending changes"},
 			Bind{Key: Key{Char: 'q'}, Cmd: cmd.Quit, Description: "Quit"},
 			Bind{Key: Key{Code: tcell.KeyBackspace2}, Cmd: cmd.SwitchToConnectionsView, Description: "Switch to connections list"},
@@ -149,6 +150,7 @@ var Keymaps = KeymapSystem{
 			Bind{Key: Key{Code: tcell.KeyCtrlR}, Cmd: cmd.Execute, Description: "Execute query"},
 			Bind{Key: Key{Code: tcell.KeyEscape}, Cmd: cmd.UnfocusEditor, Description: "Unfocus editor"},
 			Bind{Key: Key{Code: tcell.KeyCtrlSpace}, Cmd: cmd.OpenInExternalEditor, Description: "Open in external editor"},
+			Bind{Key: Key{Code: tcell.KeyCtrlG}, Cmd: cmd.OpenSchemaInExternalEditor, Description: "Open external editor with schema context"},
 		},
 		SidebarGroup: {
 			Bind{Key: Key{Char: 's'}, Cmd: cmd.UnfocusSidebar, Description: "Focus table"},

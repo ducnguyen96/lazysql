@@ -511,6 +511,30 @@ func (home *Home) homeInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		}
 	case commands.SwitchToEditorView:
 		home.createOrFocusEditorTab()
+	case commands.OpenSchemaInExternalEditor:
+		if table != nil {
+			// The SQL editor handles the key itself when it has the focus.
+			if table.Editor != nil && table.Editor.GetIsFocused() {
+				return event
+			}
+
+			// A filter input is capturing keys.
+			if table.Editor == nil && table.GetIsFiltering() {
+				return event
+			}
+		}
+
+		home.createOrFocusEditorTab()
+
+		if tab = home.TabbedPane.GetCurrentTab(); tab != nil {
+			if editorTable, ok := tab.Content.(*ResultsTable); ok && editorTable.Editor != nil {
+				// The editor tab may have just been created, with its schema
+				// still loading in the background.
+				editorTable.Editor.OpenSchemaInExternalEditorWhenReady(schemaWaitTimeout)
+			}
+		}
+
+		return nil
 	case commands.SwitchToConnectionsView:
 		if (table != nil && !table.GetIsEditing() && !table.GetIsFiltering()) || table == nil {
 			mainPages.SwitchToPage(pageNameConnections)

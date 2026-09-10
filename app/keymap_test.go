@@ -348,3 +348,25 @@ func TestApplyKeymapConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestSchemaExternalEditorIsReachable(t *testing.T) {
+	event := tcell.NewEventKey(tcell.KeyCtrlG, 0, tcell.ModNone)
+
+	for _, group := range []string{EditorGroup, HomeGroup} {
+		t.Run(group, func(t *testing.T) {
+			if got := Keymaps.Group(group).Resolve(event); got != cmd.OpenSchemaInExternalEditor {
+				t.Errorf("expected Ctrl+G in the %s group to resolve to OpenSchemaInExternalEditor, got %s", group, got)
+			}
+		})
+	}
+}
+
+func TestSchemaExternalEditorKeyIsNotShared(t *testing.T) {
+	for _, group := range []string{EditorGroup, HomeGroup} {
+		for _, bind := range Keymaps.Group(group) {
+			if bind.Key.Code == tcell.KeyCtrlG && bind.Cmd != cmd.OpenSchemaInExternalEditor {
+				t.Errorf("Ctrl+G in the %s group is also bound to %s", group, bind.Cmd)
+			}
+		}
+	}
+}

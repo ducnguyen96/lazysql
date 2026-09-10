@@ -15,7 +15,7 @@
 
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      version = "0.5.6-unstable-${self.shortRev or self.dirtyShortRev or "dirty"}";
+      version = "0.6.0-unstable-${self.shortRev or self.dirtyShortRev or "dirty"}";
     in
     {
       overlays.default = final: _prev: {

@@ -500,6 +500,7 @@ Available groups: `Home`, `Connection`, `Tree`, `TreeFilter`, `Table`, `Editor`,
 | L | MoveRight | Focus table |
 | H | MoveLeft | Focus tree |
 | Ctrl-E | SwitchToEditorView | Open SQL editor |
+| Ctrl-G | OpenSchemaInExternalEditor | Open external editor with schema context |
 | Ctrl-S | Save | Execute pending changes |
 | q | Quit | Quit |
 | Backspace | SwitchToConnectionsView | Switch to connections list |
@@ -593,6 +594,7 @@ Available groups: `Home`, `Connection`, `Tree`, `TreeFilter`, `Table`, `Editor`,
 | Ctrl-R | Execute | Execute query |
 | Esc | UnfocusEditor | Unfocus editor |
 | Ctrl-Space | OpenInExternalEditor | Open in external editor |
+| Ctrl-G | OpenSchemaInExternalEditor | Open external editor with schema context |
 
 Specific editor for lazysql can be set by `$SQL_EDITOR`.
 
@@ -662,6 +664,41 @@ The external editor feature (CTRL + Space in SQL Editor, CTRL + o in Table) uses
 - Table cells: `$EDITOR` > `$VISUAL` > `vi`
 
 This feature is only available on Linux and macOS.
+
+#### Schema context (CTRL + G)
+
+CTRL + G opens the same external editor, but the file starts with the current
+connection's schema written as SQL comments — provider, database, and every
+table with its columns, types, primary keys and foreign keys:
+
+```sql
+-- >>> lazysql:schema >>>
+-- Everything between these markers is discarded when you close the
+-- editor. Ask your assistant for a query, leave the SQL below the
+-- block, then save and quit to run it in lazysql.
+--
+-- connection: local-mysql | provider: mysql | database: shopdb
+--
+-- users(id int NOT NULL PK, email varchar(255) NOT NULL, deleted_at timestamp)
+-- orders(id int NOT NULL PK, user_id int NOT NULL -> users.id)
+-- <<< lazysql:schema <<<
+
+SELECT * FROM users LIMIT 100;
+```
+
+This gives an AI assistant running in your editor everything it needs to write
+a query against the database you are connected to. Whatever the SQL editor
+already contains is carried below the block, so CTRL + G also works for
+refining the query you are on.
+
+When you save and quit, the block between the markers is removed and the
+remaining SQL is loaded into the SQL editor — press CTRL + R to execute it.
+Nothing is run automatically.
+
+CTRL + G also works from the tree and table views: it opens (or focuses) the
+editor tab first. The schema is collected in the background, and lazysql waits
+up to three seconds for it before opening the editor — on a very large database
+the block may start out listing table names only, with a note saying so.
 
 
 ## Example connection URLs

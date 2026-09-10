@@ -103,6 +103,9 @@ type SQLEditor struct {
 	acTableHint string
 	acVisible   bool
 
+	// --- schema handed to the external editor ---
+	schema *SchemaSnapshot
+
 	// --- existing API fields ---
 	state         *SQLEditorState
 	subscribers   []chan models.StateChange
@@ -227,6 +230,87 @@ func (e *SQLEditor) SetColumns(table string, columns []string) {
 	e.completer.SetColumns(table, columns)
 }
 
+// How long to wait for a background schema load before opening the external
+// editor anyway, and how often to check on it.
+const (
+	schemaWaitTimeout      = 3 * time.Second
+	schemaWaitPollInterval = 100 * time.Millisecond
+)
+
+// SetSchemaSnapshot stores the schema handed to the external editor.
+func (e *SQLEditor) SetSchemaSnapshot(snapshot *SchemaSnapshot) {
+	e.schema = snapshot
+}
+
+// HasSchema reports whether the schema handed to the external editor is fully
+// loaded. Must be called from the UI goroutine.
+func (e *SQLEditor) HasSchema() bool {
+	return e.schema != nil && e.schema.Complete
+}
+
+// OpenSchemaInExternalEditorWhenReady waits up to timeout for the background
+// schema load to produce something before opening the external editor, so
+// triggering this on a freshly opened editor tab still yields a useful schema
+// block instead of an empty one.
+func (e *SQLEditor) OpenSchemaInExternalEditorWhenReady(timeout time.Duration) {
+	if e.HasSchema() {
+		e.OpenSchemaInExternalEditor()
+		return
+	}
+
+	// The schema loader publishes its result on the UI goroutine, so the wait
+	// has to happen off it.
+	go func() {
+		deadline := time.Now().Add(timeout)
+
+		for time.Now().Before(deadline) {
+			ready := make(chan bool, 1)
+			app.App.QueueUpdate(func() { ready <- e.HasSchema() })
+
+			if <-ready {
+				break
+			}
+
+			time.Sleep(schemaWaitPollInterval)
+		}
+
+		app.App.QueueUpdateDraw(func() {
+			e.OpenSchemaInExternalEditor()
+		})
+	}()
+}
+
+// OpenSchemaInExternalEditor opens the external editor on a file that starts
+// with the connection's schema written as SQL comments, so an assistant working
+// in that editor knows which tables, columns and relationships it can query.
+// The schema block is stripped when the editor closes, leaving only the query
+// ready to execute.
+func (e *SQLEditor) OpenSchemaInExternalEditor() {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return
+	}
+
+	currentText := e.GetText()
+
+	var editedText string
+
+	app.App.Suspend(func() {
+		editedText = openExternalEditor(BuildExternalEditorContent(e.schema, currentText), e.ConnectionURL)
+	})
+
+	query := StripSchemaContext(editedText)
+
+	// Nothing but the schema block came back: keep what the editor had rather
+	// than wiping it.
+	if query == "" || query == strings.TrimSpace(currentText) {
+		return
+	}
+
+	// SetText already calls pushUndo internally
+	e.SetText(query, true)
+	e.Publish(eventSQLEditorStatus, "Query loaded from external editor. Press Ctrl+R to execute it.")
+}
+
 // ---------------------------------------------------------------------------
 // Input handling
 // ---------------------------------------------------------------------------
@@ -247,6 +331,11 @@ func (e *SQLEditor) InputHandler() func(event *tcell.EventKey, setFocus func(p t
 					e.SetText(newText, true)
 				}
 			}
+			return
+		}
+
+		if cmd == commands.OpenSchemaInExternalEditor {
+			e.OpenSchemaInExternalEditorWhenReady(schemaWaitTimeout)
 			return
 		}
 
