@@ -1794,27 +1794,20 @@ func itoa(n int) string {
 // openExternalEditor opens the user's preferred editor to edit the query.
 // It should be called within app.Suspend() to ensure the TUI is properly restored.
 func openExternalEditor(currentText string, connectionURL string) string {
-	tmpFile, err := os.CreateTemp("", "lazysql-*.sql")
+	target, err := newExternalEditorTarget(app.App.Config().ExternalEditorDir, connectionURL)
 	if err != nil {
-		logger.Error("Failed to create temporary file", map[string]any{"error": err.Error()})
-		return currentText
-	}
-	defer os.Remove(tmpFile.Name())
-
-	path := tmpFile.Name()
-	content := []byte(currentText)
-
-	if _, err := tmpFile.Write(content); err != nil {
-		logger.Error("Failed to write to temporary file", map[string]any{"error": err.Error()})
-		err := tmpFile.Close()
-		if err != nil {
-			logger.Error("Failed to close temporary file", map[string]any{"error": err.Error()})
-		}
+		logger.Error("Failed to prepare the external editor file", map[string]any{"error": err.Error()})
 		return currentText
 	}
 
-	if err := tmpFile.Close(); err != nil {
-		logger.Error("Failed to close temporary file", map[string]any{"error": err.Error()})
+	if target.Cleanup {
+		defer os.Remove(target.Path)
+	}
+
+	path := target.Path
+
+	if err := os.WriteFile(path, []byte(currentText), 0o600); err != nil {
+		logger.Error("Failed to write to the external editor file", map[string]any{"error": err.Error(), "path": path})
 		return currentText
 	}
 
@@ -1830,6 +1823,9 @@ func openExternalEditor(currentText string, connectionURL string) string {
 	editor := getEditor()
 
 	cmd := exec.Command(editor, path) // #nosec G204 -- launching the user's configured external editor
+	// Editor plugins that look for a project root work from the editor's own
+	// working directory, so run it inside the configured one.
+	cmd.Dir = target.Workdir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1840,7 +1836,7 @@ func openExternalEditor(currentText string, connectionURL string) string {
 
 	updatedContent, err := os.ReadFile(path)
 	if err != nil {
-		logger.Error("Failed to read from temporary file", map[string]any{"error": err.Error()})
+		logger.Error("Failed to read the external editor file", map[string]any{"error": err.Error(), "path": path})
 		return currentText
 	}
 

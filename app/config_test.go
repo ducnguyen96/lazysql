@@ -639,3 +639,46 @@ func TestLoadConfigLocalOverridesDropIns(t *testing.T) {
 		t.Errorf("DefaultPageSize = %d, want 300 (local wins over drop-ins)", App.config.AppConfig.DefaultPageSize)
 	}
 }
+
+func TestLoadConfigReadsExternalEditorDir(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
+
+	tmpDir, err := os.MkdirTemp("", "lazysql-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	globalConfig := `
+[application]
+ExternalEditorDir = "~/work/myapp"
+`
+	globalPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(globalPath, []byte(globalConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	App.config = defaultConfig()
+
+	if err := LoadConfig(globalPath); err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if got := App.config.AppConfig.ExternalEditorDir; got != "~/work/myapp" {
+		t.Errorf("ExternalEditorDir = %q, want %q", got, "~/work/myapp")
+	}
+}

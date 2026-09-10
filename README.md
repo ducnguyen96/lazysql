@@ -184,6 +184,7 @@ The `[application]` section is used to define some app settings. Not all setting
 | SidebarOverlay | false | Show sidebar as overlay instead of side panel |
 | JSONViewerWordWrap | false | Enable word wrap in JSON viewer |
 | EnterOpensJSONViewer | false | Open JSON viewer when pressing Enter on a cell |
+| ExternalEditorDir | (unset) | Directory the external editor's scratch query file is written to. Unset means a per-connection file in lazysql's own data directory |
 
 ### Local Configuration
 
@@ -665,6 +666,46 @@ The external editor feature (CTRL + Space in SQL Editor, CTRL + o in Table) uses
 
 This feature is only available on Linux and macOS.
 
+#### Where the query file lives
+
+The SQL editor writes the query to a file and opens your editor on it. That file
+lives in lazysql's own data directory, one per connection, next to the query
+history and saved queries:
+
+```
+~/.config/lazysql/queries/<connection>.sql                     # Linux
+~/Library/Application Support/lazysql/queries/<connection>.sql # macOS
+```
+
+The path is stable, so your editor keeps its undo history and session state
+between opens, and nothing is left lying around in your home directory or
+`/tmp`.
+
+Editor plugins that look for a project root — an AI assistant running inside
+Neovim, for example — will still see a directory that has nothing to do with
+your code. Set `ExternalEditorDir` to put the file inside a project instead:
+
+```toml
+[application]
+ExternalEditorDir = "~/work/myapp"
+```
+
+lazysql then writes `~/work/myapp/lazysql-query.sql` and launches the editor
+with that directory as its working directory, so both the buffer's path and the
+editor's cwd are inside the project. A leading `~` is expanded and relative
+paths resolve against the directory lazysql was started in. A configured
+directory gets a single `lazysql-query.sql` rather than a file per connection,
+so the name stays predictable inside a repository.
+
+Since a local `.lazysql.toml` overrides the global config, you can also set this
+per project:
+
+```toml
+# ~/work/myapp/.lazysql.toml
+[application]
+ExternalEditorDir = "."
+```
+
 #### Schema context (CTRL + G)
 
 CTRL + G opens the same external editor, but the file starts with the current
@@ -687,7 +728,10 @@ SELECT * FROM users LIMIT 100;
 ```
 
 This gives an AI assistant running in your editor everything it needs to write
-a query against the database you are connected to. Whatever the SQL editor
+a query against the database you are connected to. The database engine's own
+catalogs (`pg_catalog`, `information_schema`, `pg_toast`, MSSQL's `sys`, and
+SQLite's `sqlite_*` tables) are left out; every other schema, including the ones
+your tools own such as `pgboss`, is included. Whatever the SQL editor
 already contains is carried below the block, so CTRL + G also works for
 refining the query you are on.
 

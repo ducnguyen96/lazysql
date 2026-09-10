@@ -260,26 +260,41 @@ func (table *ResultsTable) loadEditorSchema() {
 		return
 	}
 
-	// Collect all bare table names (for SetTables) and also build
-	// schema-qualified names for the GetTableColumns driver call.
+	// Collect the tables, named both as the driver wants them (schema-qualified
+	// for Postgres) and as the editor refers to them.
 	// Postgres returns {schema: [tables]}, others return {dbName: [tables]}.
-	type namedTable struct {
-		bareName      string // stored in autocompleter for "table." lookup
-		qualifiedName string // passed to GetTableColumns (schema.table for Postgres)
-	}
-	var allTables []string
-	var tableList []namedTable
+	var tableList []schemaTableRef
 
 	for schema, tbls := range tablesMap {
+		// The engine's own catalogs hold hundreds of tables nobody queries, and
+		// describing each one costs two round trips.
+		if skipSchema(schema, dbName) {
+			continue
+		}
+
 		for _, tbl := range tbls {
-			allTables = append(allTables, tbl)
+			if isSystemTable(tbl) {
+				continue
+			}
+
 			qn := tbl
 			// Postgres-style drivers use schemas distinct from the database name.
 			if schema != "" && schema != dbName {
 				qn = schema + "." + tbl
 			}
-			tableList = append(tableList, namedTable{bareName: tbl, qualifiedName: qn})
+			tableList = append(tableList, schemaTableRef{BareName: tbl, QualifiedName: qn})
 		}
+	}
+
+	// Map iteration order is random, so sort to keep the schema block stable
+	// between runs.
+	slices.SortFunc(tableList, func(a, b schemaTableRef) int {
+		return cmp.Compare(a.QualifiedName, b.QualifiedName)
+	})
+
+	allTables := make([]string, 0, len(tableList))
+	for _, ref := range tableList {
+		allTables = append(allTables, ref.BareName)
 	}
 
 	snapshot := &SchemaSnapshot{
@@ -303,61 +318,39 @@ func (table *ResultsTable) loadEditorSchema() {
 	}
 
 	app.App.QueueUpdateDraw(func() {
-		if table.Editor != nil {
-			table.Editor.SetTables(allTables)
+		if table.Editor == nil {
+			return
+		}
+
+		table.Editor.SetTables(allTables)
+
+		// A reload must not replace a schema that is already complete with the
+		// names-only one, or a request arriving mid-reload loses the columns.
+		if !table.Editor.HasSchema() {
 			table.Editor.SetSchemaSnapshot(tableNamesOnly)
 		}
 	})
 
-	var foreignKeys []foreignKeyEdge
+	// One query per table for the columns and one for the foreign keys, run a
+	// few at a time so a remote database does not take seconds to describe.
+	fetched := fetchSchema(table.DBDriver, dbName, tableList, schemaFetchWorkers)
 
-	// Load columns for each table, using the qualified name for the driver call
-	// but storing under the bare table name for autocomplete lookup ("table.col").
-	for _, nt := range tableList {
-		cols, err := table.DBDriver.GetTableColumns(dbName, nt.qualifiedName)
-		if err != nil {
-			_ = err
-			continue
-		}
-		if len(cols) < 2 {
-			continue
-		}
-		// cols[0] = headers, cols[1:] = data rows, column name at index 0
-		colNames := make([]string, 0, len(cols)-1)
-		for i := 1; i < len(cols); i++ {
-			if len(cols[i]) > 0 && cols[i][0] != "" {
-				colNames = append(colNames, cols[i][0])
-			}
-		}
-		if len(colNames) == 0 {
-			continue
-		}
-
-		// The same rows describe the schema handed to the external editor.
-		snapshot.Tables = append(snapshot.Tables, SchemaTable{
-			Name:    nt.bareName,
-			Columns: parseSchemaColumns(cols),
-		})
-
-		if fks, err := table.DBDriver.GetForeignKeys(dbName, nt.qualifiedName); err == nil {
-			foreignKeys = append(foreignKeys, parseForeignKeys(nt.bareName, fks)...)
-		}
-
-		tblCopy := nt.bareName
-		app.App.QueueUpdateDraw(func() {
-			if table.Editor != nil {
-				table.Editor.SetColumns(tblCopy, colNames)
-			}
-		})
-	}
-
-	snapshot.ApplyForeignKeys(foreignKeys)
+	snapshot.Tables = fetched.Tables
+	snapshot.ApplyForeignKeys(fetched.ForeignKeys)
 	snapshot.Complete = true
 
+	// Publish everything at once: QueueUpdateDraw blocks until the UI goroutine
+	// runs it, which it cannot do while the external editor is open.
 	app.App.QueueUpdateDraw(func() {
-		if table.Editor != nil {
-			table.Editor.SetSchemaSnapshot(snapshot)
+		if table.Editor == nil {
+			return
 		}
+
+		for _, tbl := range snapshot.Tables {
+			table.Editor.SetColumns(tbl.Name, fetched.Columns[tbl.Name])
+		}
+
+		table.Editor.SetSchemaSnapshot(snapshot)
 	})
 }
 

@@ -15,6 +15,9 @@ type AppConfig struct {
 	JSONViewerWordWrap           bool
 	EnterOpensJSONViewer         bool
 	ConfirmOnQuit                bool
+	// ExternalEditorDir is where the external editor's scratch query file is
+	// written. Empty means a throwaway file in the system temp directory.
+	ExternalEditorDir string
 }
 
 type Connection struct {

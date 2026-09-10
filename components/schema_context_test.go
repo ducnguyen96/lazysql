@@ -400,3 +400,49 @@ func TestRender_CompleteSnapshotHasNoLoadingNote(t *testing.T) {
 		t.Errorf("expected no loading note on a complete snapshot\n%s", rendered)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// System schema / table filtering
+// ---------------------------------------------------------------------------
+
+func TestIsSystemSchema(t *testing.T) {
+	system := []string{
+		"pg_catalog", "PG_CATALOG", "information_schema", "INFORMATION_SCHEMA",
+		"pg_toast", "pg_toast_temp_1", "pg_temp_1", "sys",
+	}
+	for _, name := range system {
+		if !isSystemSchema(name) {
+			t.Errorf("expected %q to be a system schema", name)
+		}
+	}
+
+	userDefined := []string{"public", "pgboss", "shopdb", "audit", "systems", "pgcrypto"}
+	for _, name := range userDefined {
+		if isSystemSchema(name) {
+			t.Errorf("expected %q to be kept", name)
+		}
+	}
+}
+
+func TestIsSystemTable(t *testing.T) {
+	if !isSystemTable("sqlite_sequence") {
+		t.Error("expected sqlite_sequence to be a system table")
+	}
+	if isSystemTable("users") || isSystemTable("sqlitedb_rows") {
+		t.Error("expected user tables to be kept")
+	}
+}
+
+func TestSkipSchema_KeepsTheDatabaseYouOpened(t *testing.T) {
+	// MySQL and MSSQL report the database itself as the schema, so someone who
+	// deliberately opened the "sys" database must still see its tables.
+	if skipSchema("sys", "sys") {
+		t.Error("expected the opened database to be kept even when it is named like a system schema")
+	}
+	if !skipSchema("sys", "shopdb") {
+		t.Error("expected the sys schema of another database to be skipped")
+	}
+	if skipSchema("pgboss", "shopdb") {
+		t.Error("expected a tool schema to be kept")
+	}
+}

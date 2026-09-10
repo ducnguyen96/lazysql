@@ -415,3 +415,53 @@ func StripSchemaContext(text string) string {
 
 	return strings.TrimSpace(strings.Join(remaining, "\n"))
 }
+
+// ---------------------------------------------------------------------------
+// System schema / table filtering
+// ---------------------------------------------------------------------------
+
+// systemSchemas are the schemas a database engine keeps for itself. They add
+// hundreds of tables that nobody writes queries against, so the schema context
+// (and the autocomplete built alongside it) leaves them out.
+var systemSchemas = map[string]bool{
+	"pg_catalog":         true,
+	"information_schema": true,
+	"sys":                true, // MSSQL
+}
+
+// systemSchemaPrefixes cover the schemas Postgres numbers per session.
+var systemSchemaPrefixes = []string{"pg_toast", "pg_temp"}
+
+// isSystemSchema reports whether a schema belongs to the database engine.
+func isSystemSchema(schema string) bool {
+	lower := strings.ToLower(strings.TrimSpace(schema))
+
+	if systemSchemas[lower] {
+		return true
+	}
+
+	for _, prefix := range systemSchemaPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isSystemTable reports whether a table belongs to the database engine.
+// SQLite keeps its bookkeeping in tables prefixed with "sqlite_".
+func isSystemTable(table string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(table)), "sqlite_")
+}
+
+// skipSchema reports whether a schema should be left out of the schema context.
+// MySQL and MSSQL report the database itself as the schema, so a database that
+// happens to be named like a system schema is kept when it is the one open.
+func skipSchema(schema, database string) bool {
+	if strings.EqualFold(schema, database) {
+		return false
+	}
+
+	return isSystemSchema(schema)
+}
